@@ -1,0 +1,860 @@
+---
+title: "Project Statistics 425"
+author: "Dylan Loader 30042595"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    df_print: paged
+  beamer_presentation:
+    keep_tex: yes
+  pdf_document:
+    citation_package: natbib
+    fig_caption: yes
+    fig_height: 4
+    keep_tex: yes
+    number_sections: yes
+  html_notebook:
+    number_sections: yes
+header-includes:
+- \usepackage[margin=1in]{geometry}
+- \usepackage{amsmath,amsthm,amssymb,scrextend}
+- \usepackage{fancyhdr}
+- \pagestyle{fancy}
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+# Install MICE which is used for amputation and imputation.
+if(!require("mice")){install.packages("mice")}
+library("mice")
+
+# Install VIM
+if(!require("VIM")){install.packages("VIM")}
+library("VIM")
+
+# Install amelia II for imputing the data.
+if(!require("Amelia")){install.packages("Amelia")}
+library("Amelia")
+
+# Install Hmisc for median imputation
+if(!require("Hmisc")){install.packages("Hmisc")}
+library("Hmisc")
+
+# Install MI for multiple imputation
+if(!require("mi")){install.packages("mi")}
+library("mi")
+
+if(!require("dplyr")){install.packages("dplyr")}
+library("dplyr")
+
+if(!require("tidyverse")){install.packages("tidyverse")}
+library("dplyr")
+
+if(!require("data.table")){install.packages("data.table")}
+library("tidyverse")
+
+if(!require("car")){install.packages("car")}
+library("car")
+
+if(!require("daewr")){install.packages("daewr")}
+ library("daewr")
+
+if(!require("reshape2")){install.packages("reshape2")}
+library("reshape2")
+
+# Set the seed
+set.seed(1775)
+
+# Attempt 2
+# Shared Parameter 10
+number.variables <- 10
+# 10,0000
+number.observations <- 10000
+# 10
+replicates <- 10
+# Parameter for Uniform Generaton
+lower <- 50
+upper <- 150
+
+# Paramters for Normal Generation
+mu <- 100
+sigma.squared <- sqrt(2500/3)
+# Parameter for exponential
+beta <- 1/sigma.squared
+
+
+# Generate list of Uniform matricies
+unif.list <- lapply(1:replicates, function(x) matrix(runif(number.observations, lower, upper),ncol=number.variables))
+
+
+# Check result 
+df.unif <- as.data.frame(unif.list[[1]])
+head(df.unif)
+# Generate list of Normal matricies
+norm.list <- lapply(1:replicates, function(x) matrix(rnorm(number.observations, mu, sigma.squared), ncol=number.variables))
+
+#Check result
+df.norm <- as.data.frame(norm.list[[1]])
+head(df.norm)
+
+# Generate list of Exponential matricies
+exp.list <- lapply(1:replicates, function(x) matrix(rexp(number.observations, beta), ncol= number.variables))
+
+#Check result
+df.exp <- as.data.frame(exp.list[[1]])
+head(df.exp)
+
+# Set our seed (just in case)
+set.seed(1775)
+
+# Compute the number of missing values we need to compute (1%,5%,10%)
+# http://paleocave.sciencesortof.com/2014/07/insert-random-nas-in-a-vector-in-r/
+one.percent <- 0.01
+five.percent <- 0.05
+ten.percent <- 0.10
+
+# Find the indicies of values we want to remove
+# Using the fact that R intenally stores matricies as vectors we have
+# https://www.rdocumentation.org/packages/mice/versions/2.46.0/topics/ampute
+# ampute removes values based on a continuous logistic distribution function
+#Since we wish to simulate data Missing completely at random we leave weighting out.
+unif.list.one.removed <- lapply(unif.list, function(x) (mice::ampute(x, 
+                                                                     prop = one.percent,
+                                                                     bycases = FALSE, 
+                                                                     mech = "MCAR")$amp))
+
+unif.list.five.removed <- lapply(unif.list, function(x) (mice::ampute(x, 
+                                                                      prop = five.percent,
+                                                                      bycases = FALSE, 
+                                                                      mech = "MCAR")$amp))
+
+unif.list.ten.removed <- lapply(unif.list, function(x) (mice::ampute(x, 
+                                                                     prop = ten.percent,
+                                                                     bycases = FALSE, 
+                                                                     mech = "MCAR")$amp))
+
+# Create missingness in the normal lists
+  
+norm.list.one.removed <- lapply(norm.list, function(x) (mice::ampute(x,
+                                                                     prop = one.percent,
+                                                                     bycases = FALSE,
+                                                                     mech = "MCAR")$amp))
+
+norm.list.five.removed <- lapply(norm.list, function(x) (mice::ampute(x, 
+                                                                      prop = five.percent,
+                                                                      bycases = FALSE, 
+                                                                      mech = "MCAR")$amp))
+
+norm.list.ten.removed <- lapply(norm.list, function(x) (mice::ampute(x, 
+                                                                     prop = ten.percent, 
+                                                                     bycases = FALSE, 
+                                                                     mech = "MCAR")$amp))
+
+# Create missingness in the exponential lists
+exp.list.one.removed <- lapply(exp.list, function(x) (mice::ampute(x, 
+                                                                   prop = one.percent, 
+                                                                   bycases = FALSE, 
+                                                                   mech = "MCAR")$amp))
+
+exp.list.five.removed <- lapply(exp.list, function(x) (mice::ampute(x, 
+                                                                    bycases = FALSE, 
+                                                                    prop = five.percent, 
+                                                                    mech = "MCAR")$amp))
+
+exp.list.ten.removed <- lapply(exp.list, function(x) (mice::ampute(x, 
+                                                                   prop = ten.percent, 
+                                                                   bycases = FALSE, 
+                                                                   mech = "MCAR")$amp))
+
+# Impute using mean
+# https://stackoverflow.com/questions/23242389/mean-imputation-using-sapply
+
+generate_time_stamps_mean <- function(list.of.lists){
+  temp <- list.of.lists
+  time.df <- data.frame(c())
+  missing.indicies <- vector("list", length(temp))
+  mean.imputed.list <- vector("list", length(temp))
+  
+  for (i in 1:length(temp)){
+      current.obj <- temp[[i]]
+      current.missing <- data.frame(which(is.na(current.obj),arr.ind=TRUE))
+      start.time <- Sys.time()
+      result.obj <- lapply(current.obj,
+                              function(x) {ifelse(is.na(x), mean(x, na.rm = TRUE),x)})
+      end.time <- Sys.time()
+      
+      # Storage
+      time.df[1,i] <- as.character.Date(start.time)
+      time.df[2,i] <- as.character.Date(end.time)
+      missing.indicies[[i]] <- current.missing
+      mean.imputed.list[[i]] <- result.obj
+  }
+  # Return a list, with the first element being the completed frame,the second being a dataframe of times, and the third being a dataframe of where the imputations were imputed.
+  return(list(mean.imputed.list, time.df, missing.indicies))
+}
+
+
+# Impute uniform using mean approach
+unif.one.mean <- generate_time_stamps_mean(unif.list.one.removed)
+unif.five.mean <- generate_time_stamps_mean(unif.list.five.removed)
+unif.ten.mean <- generate_time_stamps_mean(unif.list.ten.removed)
+
+# Impute norm using mean approach
+norm.one.mean <- generate_time_stamps_mean(norm.list.one.removed)
+norm.five.mean <- generate_time_stamps_mean(norm.list.five.removed)
+norm.ten.mean <- generate_time_stamps_mean(norm.list.ten.removed)
+
+# Impute exp using mean approach
+exp.one.mean <- generate_time_stamps_mean(exp.list.one.removed)
+exp.five.mean <- generate_time_stamps_mean(exp.list.five.removed)
+exp.ten.mean <- generate_time_stamps_mean(exp.list.ten.removed)
+
+
+
+# Impute using mice
+
+generate_time_stamps_mice <- function(list.of.lists){
+  temp <- list.of.lists
+  time.df <- data.frame(c())
+  missing.indicies <- vector("list", length(temp))
+  mice.imputed.list <- vector("list", length(temp))
+  
+  for (i in 1:length(temp)){
+      current.obj <- temp[[i]]
+      current.missing <- data.frame(which(is.na(current.obj),arr.ind=TRUE))
+      start.time <- Sys.time()
+      print(i)
+      # Impute using predictive mean matching
+      rand.imputed <- sample(1:5,1)
+      mice.obj <- mice(current.obj, 
+                         m=5,
+                         printFlag=FALSE,
+                         maxit = 40, 
+                         seed=1775)
+      result.obj <- mice::complete(mice.obj, rand.imputed)
+      end.time <- Sys.time()
+      # Storage
+      time.df[1,i] <- as.character.Date(start.time)
+      time.df[2,i] <- as.character.Date(end.time)
+      missing.indicies[[i]] <- current.missing
+      mice.imputed.list[[i]] <- result.obj
+  }
+  # Return a list, with the first element being the completed frame and the second being a dataframe of times
+  return(list(mice.imputed.list, time.df, missing.indicies))
+}
+
+
+# Impute uniform using mice approach
+unif.one.mice <- generate_time_stamps_mice(unif.list.one.removed)
+unif.five.mice <- generate_time_stamps_mice(unif.list.five.removed)
+unif.ten.mice <- generate_time_stamps_mice(unif.list.ten.removed)
+
+# Impute norm using mice approach
+norm.one.mice <- generate_time_stamps_mice(norm.list.one.removed)
+norm.five.mice <- generate_time_stamps_mice(norm.list.five.removed)
+norm.ten.mice <- generate_time_stamps_mice(norm.list.ten.removed)
+
+# Impute exp using mice approach
+exp.one.mice <- generate_time_stamps_mice(exp.list.one.removed)
+exp.five.mice <- generate_time_stamps_mice(exp.list.five.removed)
+exp.ten.mice <- generate_time_stamps_mice(exp.list.ten.removed)
+
+# Set seed 
+set.seed(1775)
+
+# Impute using amelia
+
+generate_time_stamps_amelia <- function(list.of.lists){
+  temp <- list.of.lists
+  time.df <- data.frame(c())
+  missing.indicies <- vector("list", length(temp))
+  amelia.imputed.list <- vector("list", length(temp))
+  
+  for (i in 1:length(temp)){
+      current.obj <- temp[[i]]
+      current.missing <- data.frame(which(is.na(current.obj),arr.ind=TRUE))
+      start.time <- Sys.time()
+      print(i)
+      # Impute using predictive mean matching
+      rand.impute <- sample(1:5,1)
+      result.obj <- Amelia::amelia(current.obj, 
+                         m=50,
+                         printFlag=FALSE, 
+                         maxit = 40, 
+                         seed=1775)$imputations[[rand.impute]]
+
+      end.time <- Sys.time()
+      # Storage
+      time.df[1,i] <- as.character.Date(start.time)
+      time.df[2,i] <- as.character.Date(end.time)
+      missing.indicies[[i]] <- current.missing
+      amelia.imputed.list[[i]] <- result.obj
+  }
+  # Return a list, with the first element being the completed frame and the second being a dataframe of times
+  return(list(amelia.imputed.list, time.df, missing.indicies))
+}
+
+
+# Impute uniform using amelia approach
+unif.one.amelia <- generate_time_stamps_amelia(unif.list.one.removed)
+unif.five.amelia <- generate_time_stamps_amelia(unif.list.five.removed)
+unif.ten.amelia <- generate_time_stamps_amelia(unif.list.ten.removed)
+
+# Impute norm using amelia approach
+norm.one.amelia <- generate_time_stamps_amelia(norm.list.one.removed)
+norm.five.amelia <- generate_time_stamps_amelia(norm.list.five.removed)
+norm.ten.amelia <- generate_time_stamps_amelia(norm.list.ten.removed)
+
+# Impute exp using amelia approach
+exp.one.amelia <- generate_time_stamps_amelia(exp.list.one.removed)
+exp.five.amelia <- generate_time_stamps_amelia(exp.list.five.removed)
+exp.ten.amelia <- generate_time_stamps_amelia(exp.list.ten.removed)
+
+
+# Set seed 
+set.seed(1775)
+
+# Impute using mi
+
+generate_time_stamps_mi <- function(list.of.lists){
+  temp <- list.of.lists
+  time.df <- data.frame(c())
+  missing.indicies <- vector("list", length(temp))
+  mi.imputed.list <- vector("list", length(temp))
+  
+  for (i in 1:length(temp)){
+      current.obj <- temp[[i]]
+      current.missing <- data.frame(which(is.na(current.obj),arr.ind=TRUE))
+      start.time <- Sys.time()
+      #print(i)
+      # Impute using predictive mean matching
+      rand.imputed <- sample(1:5,1)
+      mi.obj <- mi::mi(current.obj, 
+                          seed = 1775,
+                          n.chains = 4,
+                          n.iter = 40)
+      
+      result.obj <- mi::complete(mi.obj,1)
+      result.obj <- result.obj[,c(1:10)]
+      end.time <- Sys.time()
+      # Storage
+      time.df[1,i] <- as.character.Date(start.time)
+      time.df[2,i] <- as.character.Date(end.time)
+      missing.indicies[[i]] <- current.missing
+      mi.imputed.list[[i]] <- result.obj
+  }
+  # Return a list, with the first element being the completed frame and the second being a dataframe of times
+  return(list(mi.imputed.list, time.df, missing.indicies))
+}
+
+# Impute uniform using mi approach
+unif.one.mi <- generate_time_stamps_mi(unif.list.one.removed)
+unif.five.mi <- generate_time_stamps_mi(unif.list.five.removed)
+unif.ten.mi <- generate_time_stamps_mi(unif.list.ten.removed)
+
+# Impute norm using mi approach
+norm.one.mi <- generate_time_stamps_mi(norm.list.one.removed)
+norm.five.mi <- generate_time_stamps_mi(norm.list.five.removed)
+norm.ten.mi <- generate_time_stamps_mi(norm.list.ten.removed)
+
+# Impute exp using mi approach
+exp.one.mi <- generate_time_stamps_mi(exp.list.one.removed)
+exp.five.mi <- generate_time_stamps_mi(exp.list.five.removed)
+exp.ten.mi <- generate_time_stamps_mi(exp.list.ten.removed)
+```
+
+```{r}
+# Read in the calibration data
+calibration.data <- read.csv("C:/Users/Admin/Google Drive/Winter2018/Statistics 425/Project/Data/Calibration data.csv", stringsAsFactors = FALSE)
+head(calibration.data)
+calibration.data.cleaned <- as.data.frame(calibration.data[,c("System.Time","Elapsed.Time..sec.","Cumulative.Processor.Energy_0.Joules.")])
+colnames(calibration.data.cleaned) <- c("system.time","elapsed.time.seconds","cumulative.joules")
+str(calibration.data.cleaned)
+
+
+fix_times <- function(time.string){
+  temp <- time.string
+  # Test to see if we should round up or down a second, up=1, down = 0
+  millisecond.test <- ifelse(sapply(strsplit(temp, ":"), "[", 4) >= 500,
+                             1, 
+                             0)
+  #strsplit separate a string into a list of its elements
+  result.string <- paste(strsplit(temp, ":")[[1]][1],
+                     strsplit(temp, ":")[[1]][2],
+                     sprintf("%02d",
+                             (as.integer(strsplit(temp, ":")[[1]][3])+ millisecond.test)),
+                     sep = ":")
+  return(result.string)
+}
+
+
+calibration.data.cleaned$adj.sys.time <- sapply(calibration.data.cleaned[,'system.time'],
+                                                FUN= fix_times)
+
+calibration.data.rounded <- calibration.data.cleaned[!(duplicated(calibration.data.cleaned$adj.sys.time,
+                                                                  fromLast = TRUE)),]
+
+# Check to see we're using the largest cumulative 
+head(calibration.data.cleaned)
+head(calibration.data.rounded)
+
+#Remove the missing values from the summaries in the bottom of the csv.
+complete.calibration.data <- calibration.data.rounded[complete.cases(calibration.data.rounded),]
+complete.calibration.data$cumulative.time.diff <- (complete.calibration.data$cumulative.joules/ complete.calibration.data$elapsed.time.seconds)
+
+# This is our baseline measurement
+average.difference <- mean(complete.calibration.data$cumulative.time.diff)
+
+
+
+# mice imputations
+
+# Uniforms
+unif.mice <- rbind(data.table::rbindlist(unif.one.mice[[1]]),
+                            data.table::rbindlist(unif.five.mice[[1]]),
+                            data.table::rbindlist(unif.ten.mice[[1]]),
+                         idcol=TRUE)
+
+unif.time.mice <- reshape2::melt(cbind(unlist(unif.one.mice[[2]]),
+                          unlist(unif.five.mice[[2]]),
+                          unlist(unif.ten.mice[[2]])))
+
+unif.location.mice <- list(unif.one.mice[[3]],
+                          unif.five.mice[[3]],
+                          unif.ten.mice[[3]])
+
+
+# Normals
+norm.mice <- rbind(data.table::rbindlist(norm.one.mice[[1]]),
+                            data.table::rbindlist(norm.five.mice[[1]]),
+                            data.table::rbindlist(norm.ten.mice[[1]]),
+                         idcol=TRUE,
+                          use.names = T)
+
+norm.time.mice <- reshape2::melt(cbind(unlist(norm.one.mice[[2]]),
+                          unlist(norm.five.mice[[2]]),
+                          unlist(norm.ten.mice[[2]])))
+
+norm.location.mice <- list(norm.one.mice[[3]],
+                          norm.five.mice[[3]],
+                          norm.ten.mice[[3]])
+
+# Exponential
+exp.mice <- rbind(data.table::rbindlist(exp.one.mice[[1]]),
+                            data.table::rbindlist(exp.five.mice[[1]]),
+                            data.table::rbindlist(exp.ten.mice[[1]]),
+                            use.names = T,idcol=TRUE)
+
+exp.time.mice <- reshape2::melt(cbind(unlist(exp.one.mice[[2]]),
+                          unlist(exp.five.mice[[2]]),
+                          unlist(exp.ten.mice[[2]])))
+
+exp.location.mice <- list(exp.one.mice[[3]],
+                          exp.five.mice[[3]],
+                          exp.ten.mice[[3]])
+
+
+# amelia imputations
+
+
+# Uniforms
+unif.amelia <- rbind(data.table::rbindlist(unif.one.amelia[[1]]),
+                            data.table::rbindlist(unif.five.amelia[[1]]),
+                            data.table::rbindlist(unif.ten.amelia[[1]]),
+                         idcol=TRUE)
+
+unif.time.amelia <- reshape2::melt(cbind(unlist(unif.one.amelia[[2]]),
+                          unlist(unif.five.amelia[[2]]),
+                          unlist(unif.ten.amelia[[2]])))
+
+unif.location.amelia <- list(unif.one.amelia[[3]],
+                          unif.five.amelia[[3]],
+                          unif.ten.amelia[[3]])
+
+
+# Normals
+norm.amelia <- rbind(data.table::rbindlist(norm.one.amelia[[1]]),
+                            data.table::rbindlist(norm.five.amelia[[1]]),
+                            data.table::rbindlist(norm.ten.amelia[[1]]),
+                         idcol=TRUE)
+
+norm.time.amelia <- reshape2::melt(cbind(unlist(norm.one.amelia[[2]]),
+                          unlist(norm.five.amelia[[2]]),
+                          unlist(norm.ten.amelia[[2]])))
+
+norm.location.amelia <- list(norm.one.amelia[[3]],
+                          norm.five.amelia[[3]],
+                          norm.ten.amelia[[3]])
+# Exponential
+exp.amelia <- rbind(data.table::rbindlist(exp.one.amelia[[1]]),
+                            data.table::rbindlist(exp.five.amelia[[1]]),
+                            data.table::rbindlist(exp.ten.amelia[[1]]),
+                         idcol=TRUE)
+
+exp.time.amelia <- reshape2::melt(cbind(unlist(exp.one.amelia[[2]]),
+                          unlist(exp.five.amelia[[2]]),
+                          unlist(exp.ten.amelia[[2]])))
+
+exp.location.amelia <- list(exp.one.amelia[[3]],
+                          exp.five.amelia[[3]],
+                          exp.ten.amelia[[3]])
+
+# MI imputations
+
+# Uniforms
+unif.mi <- rbind(data.table::rbindlist(unif.one.mi[[1]]),
+                            data.table::rbindlist(unif.five.mi[[1]]),
+                            data.table::rbindlist(unif.ten.mi[[1]]),
+                         idcol=TRUE)
+
+unif.time.mi <- reshape2::melt(cbind(unlist(unif.one.mi[[2]]),
+                          unlist(unif.five.mi[[2]]),
+                          unlist(unif.ten.mi[[2]])))
+
+unif.location.mi <- list(unif.one.mi[[3]],
+                          unif.five.mi[[3]],
+                          unif.ten.mi[[3]])
+
+
+# Normals
+norm.mi <- rbind(data.table::rbindlist(norm.one.mi[[1]]),
+                            data.table::rbindlist(norm.five.mi[[1]]),
+                            data.table::rbindlist(norm.ten.mi[[1]]),
+                         idcol=TRUE)
+
+norm.time.mi <- reshape2::melt(cbind(unlist(norm.one.mi[[2]]),
+                          unlist(norm.five.mi[[2]]),
+                          unlist(norm.ten.mi[[2]])))
+
+norm.location.mi <- list(norm.one.mi[[3]],
+                          norm.five.mi[[3]],
+                          norm.ten.mi[[3]])
+# Exponential
+exp.mi <- rbind(data.table::rbindlist(exp.one.mi[[1]]),
+                            data.table::rbindlist(exp.five.mi[[1]]),
+                            data.table::rbindlist(exp.ten.mi[[1]]),
+                         idcol=TRUE)
+
+exp.time.mi <- reshape2::melt(cbind(unlist(exp.one.mi[[2]]),
+                          unlist(exp.five.mi[[2]]),
+                          unlist(exp.ten.mi[[2]])))
+
+exp.location.mi <- list(exp.one.mi[[3]],
+                          exp.five.mi[[3]],
+                          exp.ten.mi[[3]])
+
+
+# Fix the names
+names(unif.time.mice) <- c("var","set","sys.time")
+names(norm.time.mice) <- c("var","set","sys.time")
+names(exp.time.mice) <- c("var","set","sys.time")
+names(unif.time.amelia) <- c("var","set","sys.time")
+names(norm.time.amelia) <- c("var","set","sys.time")
+names(exp.time.amelia) <- c("var","set","sys.time")
+names(unif.time.mi) <- c("var","set","sys.time")
+names(norm.time.mi) <- c("var","set","sys.time")
+names(exp.time.mi) <- c("var","set","sys.time")
+
+time.df <- rbind(unif.time.mice, norm.time.mice, exp.time.mice,
+                 unif.time.amelia, norm.time.amelia, exp.time.amelia,
+                 unif.time.mi, norm.time.mi, exp.time.mi)
+list1 <- list(unif.time.mice, norm.time.mice, exp.time.mice,
+                 unif.time.amelia, norm.time.amelia, exp.time.amelia,
+                 unif.time.mi, norm.time.mi, exp.time.mi)
+
+lapply(list1,dim)
+
+
+time.df$state <- rep(c("start","stop"),each=1,times=270)
+
+time.df <- data.frame(lapply(time.df, as.character), stringsAsFactors=FALSE)
+backup.time <-time.df
+time.df$adj.sys.time <- NULL
+time.df$adj.sys.time <- sapply(strsplit(time.df$sys.time," "), `[`, 2)
+time.df <- time.df[-c(478),]
+# Subset attempt
+which(is.na(time.df))
+time.removed.df <- time.df[!duplicated(time.df$adj.sys.time, fromLast = T),]
+all.time <- time.removed.df
+
+# Import the intel data
+
+
+result.data <- read.csv("C:/Users/Admin/Google Drive/Winter2018/Statistics 425/Project/Data/ffinal.csv", stringsAsFactors = FALSE, header = TRUE)
+result.data.cleaned <- as.data.frame(result.data[,c("System.Time","Elapsed.Time..sec.","Cumulative.Processor.Energy_0.Joules.")])
+colnames(result.data.cleaned) <- c("system.time",
+                                   "elapsed.time.seconds",
+                                   "cumulative.joules")
+
+
+# Quick function to remove the milliseconds measurement from the raw intel data.
+fix_times <- function(time.string){
+  temp <- time.string
+  # Test to see if we should round up or down a second, up=1, down = 0
+  millisecond.test <- ifelse(sapply(strsplit(temp, ":"), "[", 4) >= 500,
+                             1, 
+                             0)
+  #strsplit separate a string into a list of its elements
+  result.string <- paste(strsplit(temp, ":")[[1]][1],
+                     strsplit(temp, ":")[[1]][2],
+                     sprintf("%02d",
+                             (as.integer(strsplit(temp, ":")[[1]][3])+ millisecond.test)),
+                     sep = ":")
+  return(result.string)
+}
+
+result.data.cleaned$adj.sys.time <- sapply(result.data.cleaned$system.time, FUN= fix_times) 
+
+# Remove duplicated values
+result.data.rounded <- result.data.cleaned[!(duplicated(result.data.cleaned$adj.sys.time,
+                                                                  fromLast = TRUE)),]
+
+str(result.data.rounded)
+
+# Join the DFs
+all.time <- all.time[,-c(1,2)]
+new.df <- dplyr::left_join(all.time,result.data.rounded, by = "adj.sys.time", incomparables = TRUE)
+new.df <- new.df[,-c(1,2,4)]
+which(is.na(new.df), arr.ind=TRUE)
+new.df[181,3] <- result.data.cleaned[2398,1]
+new.df[181,4] <- result.data.cleaned[2398,2]
+new.df[181,5] <- result.data.cleaned[2398,3]
+# Back up the data frame
+prepared.data <- new.df
+#prepared.data1 <- new.df[!(is.na(new.df$sys.time)),]
+prepared.data <- new.df[!(is.na(new.df$sys.time)),]
+#prepared.data <- prepared.data[-c(29),]
+
+prepared.data <- prepared.data %>% 
+  mutate(joules.used = cumulative.joules - lag(cumulative.joules))
+
+
+prepared.data <- prepared.data %>% mutate_at(c("joules.used"), funs(lead), n = 1 )
+
+# Factor template
+#prepared.data$prop.missing <- c(rep(c("1","5","10"),81))
+
+# Remove the last stop obs
+prepared.data <- prepared.data[-c(271),]
+prepared.data$distribution.used <- c(rep(c("uniform","normal","exponential"),each=30, times = 3))
+prepared.data$method <- c(rep(c("mice","amelia","mi"),each=90))
+prepared.data$missingness <- c(rep(c("one.percent","five.percent","ten.percent"),times=90))
+
+```
+
+```{r, cache = TRUE}
+# Store a copy of our working datasetx
+
+copy.prep <- prepared.data
+prepared.data <- copy.prep
+prepared.data$prop.missing <- factor(prepared.data$missingness)
+prepared.data$distribution.used <- factor(prepared.data$distribution.used)
+prepared.data$method <- factor(prepared.data$method)
+str(prepared.data)
+# Some preliminary plots
+plot.new()
+par(mfrow=c(2,2))
+interaction.plot(prepared.data$distribution.used,
+                 prepared.data$prop.missing,
+                 prepared.data$joules.used,col=rainbow(3),
+                 main = "Distribution vs. Missingness",fixed=TRUE)
+interaction.plot(prepared.data$prop.missing,
+                 prepared.data$method,
+                 prepared.data$joules.used,col=rainbow(3),
+                 main = "Missingness vs. Imputation Method")
+interaction.plot(prepared.data$distribution.used,
+                 prepared.data$method,
+                 prepared.data$joules.used,col=rainbow(3),
+                 main = "Distribution vs. Method",fixed=TRUE)
+plot.design(prepared.data, main = "Design Plot")
+
+
+# Model fitting
+fit <- lm(prepared.data$joules.used ~ prop.missing*distribution.used*method, data=prepared.data) 
+aov.1 <- anova(fit)
+aov.2 <- aov(fit)
+#summary(aov.1)
+summary(aov.2)
+
+fit.summary <- summary.aov(fit)[[1]]
+knitr::kable(fit.summary)
+
+# Check of assumptions
+# Interval or better data assumption is realized as the data are continous  
+# Normality
+plot.new()
+par(mfrow=c(2,2))
+Draw_matrix_plots1 <- function(){
+  layout(matrix(c(1,2,3,4), 2, 2, byrow = TRUE),heights=c(3,3))
+boxplot(aov.2$residuals, 
+        main="Boxplot of Joules by Missingness", 
+        xlab="Imputation Method",
+        ylab = "Joules",
+        col= "green", 
+        data = prepared.data)
+
+boxplot(aov.2$residuals, 
+        main="Boxplot of Joules Used by Distribution Used", 
+        xlab="Distribution Used",
+        ylab = "Joules",
+        col= "pink", 
+        data = prepared.data)
+
+boxplot(aov.2$residuals, 
+        main="Boxplot of Joules Used by Imputation Method", 
+        xlab="Imputation Method",
+        ylab = "Joules",
+        col= rainbow(4), 
+        data = prepared.data)
+aov.residuals <- aov.2$residuals
+qqnorm(y=aov.residuals,
+         col= "navy")+qqline(y=aov.residuals)
+}
+
+Draw_matrix_plots1()
+
+shapiro.m1 <- shapiro.test(aov.2$residuals)
+shapiro.m1
+
+lt.method <- car::leveneTest(aov.2$residuals, data=prepared.data)
+lt.method
+# Variance testing
+bt.missingness <- bartlett.test(prepared.data$joules.used ~ prop.missing, data=prepared.data)
+bt.distribution.used <- bartlett.test(prepared.data$joules.used ~ distribution.used, data=prepared.data)
+bt.method <- bartlett.test(prepared.data$joules.used ~ method, data=prepared.data)
+
+bt.df <- data.frame(cbind(c(1,2,3),c(bt.missingness$statistic[[1]],
+                      bt.distribution.used$statistic[[1]],
+                      bt.method$statistic[[1]]),
+                    c(bt.missingness$parameter[[1]],
+                      bt.distribution.used$parameter[[1]],
+                      bt.method$parameter[[1]]),
+                    c(bt.missingness$p.value[[1]],
+                      bt.distribution.used$p.value[[1]],
+                      bt.method$p.value[[1]])))
+
+bt.df
+# Transformation
+plot.new()
+par(mfrow=c(1,1))
+car::boxCox(aov.2)
+
+optimal.power <- car::powerTransform(aov.2)
+optimal.power
+# Transformed Fits
+prepared.data['joules.used.log'] <- lapply(prepared.data["joules.used"], function(x) log(x))
+prepared.data['joules.used.bc'] <- lapply(prepared.data["joules.used"], function(x) x^(0.6900919))
+fit3 <- lm(prepared.data$joules.used.log ~ prop.missing*distribution.used*method, data=prepared.data) 
+fit4 <- lm(prepared.data$joules.used.bc ~ prop.missing*distribution.used*method, data=prepared.data) 
+
+aov.log <- aov(fit3)
+aov.bc <- aov(fit4)  
+
+plot.new()
+par(mfrow=c(2,2))
+plot(aov.bc)
+
+plot.new()
+par(mfrow=c(2,2))
+plot(aov.log)
+
+knitr::kable(summary(aov.log)[[1]])
+summary(aov.log)[[1]]
+
+
+summary(aov.bc)[[1]]
+
+
+# Final model
+fit6 <- lm(prepared.data$joules.used.bc ~ distribution.used*method, data=prepared.data) 
+aov.final <- aov(fit6)
+summary(aov.final)
+
+# Coefficient Estimates
+model.table <- model.tables(aov.final, type="mean", sd= TRUE)
+
+model.coef <-model.tables(aov.final, type="effects", sd= TRUE)
+(model.table)
+model.coef
+# Compare the two models using anova (they are not significantly different)
+# (anova(aov.final,aov.bc))
+# aov.final$xlevels[[1]]
+
+plot.new()
+par(mfrow=c(1,3))
+qqnorm(aov.final$residuals,
+col="navy",main = "Normal Residual QQ Plot")
+qqline(aov.final$residuals, col=2)
+
+plot(aov.final$fitted.values,aov.final$residuals,
+col="navy", main = "Fitted vs. Residuals")
+abline(h=0, col="red")
+
+stripchart(residuals(aov.final)~prepared.data$method ,method="stack",vertical=TRUE,jitter=0,xlab="Imputation Method",ylab="",pch=1,cex=1.5,main="Residuals by Imputation Method", col="navy")
+abline(h=0,lty=3,col="red")
+
+plot.new()
+par(mfrow=c(2,2))
+plot(aov.final)
+
+
+plot.new()
+par(mfrow=c(1,2))
+# stripchart(residuals(aov.final)~prepared.data$distribution.used,method="stack",vertical=TRUE,jitter=0,xlab="brand",ylab="",pch=1,cex=1.5,main="Residuals by Distribution",col="navy")
+# abline(h=0,lty=3,col="red")
+
+# stripchart(residuals(aov.final)~prepared.data$method ,method="stack",vertical=TRUE,jitter=0,xlab="brand",ylab="",pch=1,cex=1.5,main="Residuals by Imputation Method", col="navy")
+# abline(h=0,lty=3,col="red")
+
+# stripchart(residuals(aov.final)~prepared.data$prop.missing ,method="stack",vertical=TRUE,jitter=0,xlab="brand",ylab="",pch=1,cex=1.5,main="Residuals by Missingness", col="navy")
+# abline(h=0,lty=3,col="red")
+
+
+shapiro.final <- shapiro.test(residuals(aov.final))
+shapiro.final
+# Variance testing
+bt.missingness <- bartlett.test(residuals(aov.final), data=prepared.data)
+bt.distribution.used <- bartlett.test(residuals(aov.final), data=prepared.data)
+bt.method <- bartlett.test(residuals(aov.final), data=prepared.data)
+
+# bt.df <- data.frame(cbind(c(1,2,3),c(bt.missingness$statistic[[1]],
+#                       bt.distribution.used$statistic[[1]],
+#                       bt.method$statistic[[1]]),
+#                     c(bt.missingness$parameter[[1]],
+#                       bt.distribution.used$parameter[[1]],
+#                       bt.method$parameter[[1]]),
+#                     c(bt.missingness$p.value[[1]],
+#                       bt.distribution.used$p.value[[1]],
+#                       bt.method$p.value[[1]])))
+# 
+# names(bt.df) <- c("Factor","Statistic","DF","P-value")
+# rownames(bt.df)<- c("Imputation Method","Distribution","Missingness")
+# knitr::kable(bt.df)
+
+lt.final <- car::leveneTest(prepared.data$joules.used.bc ~ prop.missing*distribution.used, data=prepared.data)
+lt.final
+
+lt.distribution.used <- car::leveneTest(prepared.data$joules.used.log ~ distribution.used, data=prepared.data)
+lt.method <- car::leveneTest(prepared.data$joules.used.log ~ method, data=prepared.data)
+
+
+
+
+
+# Tukey tests 
+str(TukeyHSD(aov.final)[[1]])
+TukeyHSD(aov.final)[[1]]
+TukeyHSD(aov.final)[[2]]
+TukeyHSD(aov.final)[[3]]
+knitr::kable(TukeyHSD(aov.final)[[2]])
+knitr::kable(TukeyHSD(aov.final)[[3]])
+t.table <- TukeyHSD(aov.final)[[4]]
+
+plot(aov.final)
+plot(anova((fit5) ))
+plot(fit5)
+
+```
+
+
